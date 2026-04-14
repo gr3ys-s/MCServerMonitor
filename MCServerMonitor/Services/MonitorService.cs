@@ -13,6 +13,9 @@ namespace MCServerMonitor.Services
         private int _failedChecks;
         private readonly ConfigManager _configManager;
         private readonly MinecraftServerPinger _pinger;
+        private string _currentDataFilePath;
+        private DateTime _monitoringStartTime;
+        private int _monitoringDuration;
 
         public event EventHandler<MonitoringData> OnDataCollected;
         public event EventHandler<MonitoringStats> OnMonitoringStopped;
@@ -35,19 +38,27 @@ namespace MCServerMonitor.Services
             }
 
             _currentConfig = config;
+            _monitoringStartTime = DateTime.Now;
+            _monitoringDuration = config.CheckIntervalSeconds;
 
-            // Проверяем путь перед запуском, если включено сохранение
+            // Проверяем папку перед запуском, если включено сохранение
             if (_currentConfig.EnableFileSave)
             {
-                if (!_configManager.IsPathWritable(_currentConfig.FilePath))
+                if (string.IsNullOrEmpty(_currentConfig.SaveFolderPath))
                 {
-                    Console.WriteLine($"[Ошибка] Нет прав на запись в '{_currentConfig.FilePath}'");
+                    _currentConfig.SaveFolderPath = _configManager.GetDefaultFolderPath();
+                }
+
+                if (!_configManager.IsFolderWritable(_currentConfig.SaveFolderPath))
+                {
+                    Console.WriteLine($"[Ошибка] Папка '{_currentConfig.SaveFolderPath}' недоступна для записи.");
                     Console.WriteLine("Пожалуйста, измените путь сохранения в настройках");
                     return false;
                 }
+
+                _currentDataFilePath = _configManager.GetFullFilePath(_currentConfig, _monitoringStartTime, _monitoringDuration);
             }
 
-            // Проверяем доступность сервера
             Console.WriteLine($"[Система] Проверка доступности сервера {_currentConfig.ServerAddress}:{_currentConfig.ServerPort}...");
             try
             {
@@ -55,7 +66,8 @@ namespace MCServerMonitor.Services
 
                 Console.WriteLine($"[Система] Сервер доступен!");
                 Console.WriteLine($"[Система] Версия сервера: {testStatus.Version}");
-                Console.WriteLine($"[Система] MOTD: {testStatus.Description} \n");
+                Console.WriteLine($"[Система] MOTD: {testStatus.Description}");
+                Console.WriteLine();
             }
             catch (Exception ex)
             {
@@ -75,7 +87,8 @@ namespace MCServerMonitor.Services
             Console.WriteLine($"[Система] Сохранение данных: {(_currentConfig.EnableFileSave ? "Включено" : "Отключено")}");
             if (_currentConfig.EnableFileSave)
             {
-                Console.WriteLine($"[Система] Файл сохранения: {_currentConfig.FilePath}");
+                Console.WriteLine($"[Система] Папка сохранения: {_currentConfig.SaveFolderPath}");
+                Console.WriteLine($"[Система] Файл сохранения: {Path.GetFileName(_currentDataFilePath)}");
             }
 
             return true;
@@ -99,7 +112,7 @@ namespace MCServerMonitor.Services
             }
             catch (OperationCanceledException)
             {
-                // Ожидаемое исключение при отмене
+                
             }
 
             _isMonitoring = false;
@@ -108,7 +121,8 @@ namespace MCServerMonitor.Services
             {
                 TotalChecks = _successfulChecks + _failedChecks,
                 SuccessfulChecks = _successfulChecks,
-                FailedChecks = _failedChecks
+                FailedChecks = _failedChecks,
+                DataFilePath = _currentDataFilePath
             };
 
             OnMonitoringStopped?.Invoke(this, stats);
@@ -143,10 +157,10 @@ namespace MCServerMonitor.Services
                         Description = status.Description,
                         SamplePlayers = status.SamplePlayers,
                         CheckNumber = checkCounter,
+                        MonitoringStartTime = _monitoringStartTime,
                         IsSuccess = true
                     };
 
-                    // Сохраняем данные, если включено сохранение
                     if (_currentConfig.EnableFileSave)
                     {
                         await SaveDataAsync(data);
@@ -165,14 +179,19 @@ namespace MCServerMonitor.Services
                         ServerAddress = _currentConfig.ServerAddress,
                         ServerPort = _currentConfig.ServerPort,
                         CheckNumber = checkCounter,
+                        MonitoringStartTime = _monitoringStartTime,
                         IsSuccess = false,
                         ErrorMessage = ex.Message
                     };
 
+                    if (_currentConfig.EnableFileSave)
+                    {
+                        await SaveDataAsync(data);
+                    }
+
                     OnDataCollected?.Invoke(this, data);
                 }
 
-                // Ожидание следующей проверки
                 try
                 {
                     await Task.Delay(_currentConfig.CheckIntervalSeconds * 1000, cancellationToken);
@@ -188,20 +207,19 @@ namespace MCServerMonitor.Services
         {
             try
             {
-                string directory = Path.GetDirectoryName(_currentConfig.FilePath);
+                string directory = Path.GetDirectoryName(_currentDataFilePath);
 
-                // Создаём директорию, если её нет
                 if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
                 {
                     Directory.CreateDirectory(directory);
                 }
 
                 string line = data.ToFileString();
-                await File.AppendAllTextAsync(_currentConfig.FilePath, line + Environment.NewLine, Encoding.UTF8);
+                await File.AppendAllTextAsync(_currentDataFilePath, line + Environment.NewLine, Encoding.UTF8);
             }
             catch (UnauthorizedAccessException)
             {
-                Console.WriteLine($"[Ошибка] Нет прав на запись в файл '{_currentConfig.FilePath}'. Сохранение отключено.");
+                Console.WriteLine($"[Ошибка] Нет прав на запись в файл '{_currentDataFilePath}'. Сохранение отключено.");
                 _currentConfig.EnableFileSave = false;
             }
             catch (Exception ex)
@@ -222,23 +240,38 @@ namespace MCServerMonitor.Services
 
             try
             {
-                if (File.Exists(_currentConfig.FilePath))
+                if (Directory.Exists(_currentConfig.SaveFolderPath))
                 {
-                    var lines = await File.ReadAllLinesAsync(_currentConfig.FilePath, Encoding.UTF8);
-                    int start = Math.Max(0, lines.Length - count);
-                    for (int i = start; i < lines.Length; i++)
+                    var files = Directory.GetFiles(_currentConfig.SaveFolderPath, "monitor_*.txt");
+                    if (files.Length > 0)
                     {
-                        records.Add(lines[i]);
+                        var latestFile = files.OrderByDescending(f => File.GetLastWriteTime(f)).First();
+                        var lines = await File.ReadAllLinesAsync(latestFile, Encoding.UTF8);
+                        int start = Math.Max(0, lines.Length - count);
+                        for (int i = start; i < lines.Length; i++)
+                        {
+                            records.Add(lines[i]);
+                        }
+
+                        if (records.Count > 0)
+                        {
+                            records.Insert(0, $"=== Файл: {Path.GetFileName(latestFile)} ===");
+                            records.Insert(1, "");
+                        }
+                    }
+                    else
+                    {
+                        records.Add("Файлы с данными ещё не созданы");
                     }
                 }
                 else
                 {
-                    records.Add("Файл с данными ещё не создан");
+                    records.Add("Папка с данными не найдена");
                 }
             }
             catch (UnauthorizedAccessException)
             {
-                records.Add($"Нет прав на чтение файла: {_currentConfig.FilePath}");
+                records.Add($"Нет прав на чтение папки: {_currentConfig.SaveFolderPath}");
             }
             catch (Exception ex)
             {
@@ -254,24 +287,23 @@ namespace MCServerMonitor.Services
         {
             _currentConfig = newConfig;
 
-            // Проверяем новый путь перед сохранением
-            if (_currentConfig.EnableFileSave && !_configManager.IsPathWritable(_currentConfig.FilePath))
+            if (_currentConfig.EnableFileSave && !string.IsNullOrEmpty(_currentConfig.SaveFolderPath) && !_configManager.IsFolderWritable(_currentConfig.SaveFolderPath))
             {
-                Console.WriteLine($"[Ошибка] Путь '{_currentConfig.FilePath}' недоступен для записи.");
+                Console.WriteLine($"[Ошибка] Папка '{_currentConfig.SaveFolderPath}' недоступна для записи.");
                 return false;
             }
 
             return await _configManager.SaveConfigAsync(_currentConfig);
         }
 
-        public bool IsPathWritable(string path)
+        public bool IsFolderWritable(string folderPath)
         {
-            return _configManager.IsPathWritable(path);
+            return _configManager.IsFolderWritable(folderPath);
         }
 
-        public string GetDefaultFilePath()
+        public string GetDefaultFolderPath()
         {
-            return _configManager.GetDefaultFilePath();
+            return _configManager.GetDefaultFolderPath();
         }
     }
 
@@ -284,9 +316,11 @@ namespace MCServerMonitor.Services
         public int? PlayersMax { get; set; }
         public int Latency { get; set; }
         public string Version { get; set; } = "";
+        public string MinecraftVersion { get; set; } = "";
         public string Description { get; set; } = "";
         public MCStatus.Player[] SamplePlayers { get; set; } = Array.Empty<MCStatus.Player>();
         public int CheckNumber { get; set; }
+        public DateTime MonitoringStartTime { get; set; }
         public bool IsSuccess { get; set; }
         public string ErrorMessage { get; set; } = "";
 
@@ -294,71 +328,72 @@ namespace MCServerMonitor.Services
         {
             if (IsSuccess)
             {
-                return $"[{Timestamp:yyyy-MM-dd HH:mm:ss}] | #{CheckNumber} | Игроков (макс. {PlayersMax}): {PlayersOnline} | Пинг (в мс): {Latency} " +
-                    $"| Игроки: {ToPlayersString(SamplePlayers, PlayersOnline)}";
+                string result = $"[{Timestamp:yyyy-MM-dd HH:mm:ss}] #{CheckNumber} | Игроков (из {PlayersMax}): {PlayersOnline} | Пинг (мс): {Latency} ";
+
+                if (SamplePlayers.Length > 0)
+                {
+                    result += $" | Игроки: {ToPlayersString(SamplePlayers)}";
+                }
+
+                return result;
             }
             else
             {
-                return $"[{Timestamp:yyyy-MM-dd HH:mm:ss}] | Проверка #{CheckNumber} | Ошибка: {ErrorMessage}";
+                return $"[{Timestamp:yyyy-MM-dd HH:mm:ss}] #{CheckNumber} | Ошибка: {ErrorMessage}";
             }
-        }
-        public static string ToPlayersString(MCStatus.Player[] players, int? playersActual, int maxPlayersCount = 20)
-        {
-            if (players == null || players.Length == 0)
-                return "нет игроков";
-
-            // Извлекаем имена и сортируем по алфавиту
-            var playerNames = players
-                .Select(p => p.Name)
-                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            int playersToShow = Math.Min(playerNames.Count, maxPlayersCount);
-            var namesToShow = playerNames.Take(playersToShow);
-
-            string result = string.Join(", ", namesToShow);
-
-            if (playerNames.Count > maxPlayersCount)
-            {
-                result += $" и ещё {playerNames.Count - maxPlayersCount} игроков";
-            }
-
-            if (playerNames.Count != playersActual)
-            {
-                result += $" и ещё {playersActual - players.Length} не отображаются в списке";
-            }
-
-            return result;
         }
 
         public string ToDisplayString()
         {
             if (IsSuccess)
             {
-                // Цвет для игроков
-                string playersColor;
-                if (PlayersOnline > 100)
-                    playersColor = "\x1b[93m"; // Жёлтый
-                else if (PlayersOnline > 50)
-                    playersColor = "\x1b[92m"; // Зелёный
-                else
-                    playersColor = "\x1b[96m"; // Голубой
+                string playersColor = PlayersOnline > 100 ? "\x1b[93m" : (PlayersOnline > 50 ? "\x1b[92m" : "\x1b[96m");
+                string pingColor = Latency > 200 ? "\x1b[91m" : (Latency > 100 ? "\x1b[93m" : "\x1b[92m");
 
-                // Цвет для пинга
-                string pingColor;
-                if (Latency > 200)
-                    pingColor = "\x1b[91m"; // Красный
-                else if (Latency > 100)
-                    pingColor = "\x1b[93m"; // Жёлтый
-                else
-                    pingColor = "\x1b[92m"; // Зелёный
+                string playersShort = ToShortPlayersString(SamplePlayers);
 
-                return $"[{Timestamp:HH:mm:ss}] | Онлайн: {playersColor}{PlayersOnline}/{PlayersMax}\x1b[0m | Пинг: {pingColor}{Latency}мс\x1b[0m | #{CheckNumber} | {ToPlayersString(SamplePlayers, PlayersOnline)}";
+                return $"[{Timestamp:HH:mm:ss}] | Онлайн: {playersColor}{PlayersOnline}/{PlayersMax}\x1b[0m | Пинг: {pingColor}{Latency}мс\x1b[0m | #{CheckNumber} | {playersShort}";
             }
             else
             {
-                return $"[{Timestamp:HH:mm:ss}] | Ошибка: {ErrorMessage}\x1b[0m | #{CheckNumber}";
+                return $"[{Timestamp:HH:mm:ss}] \x1b[91m{ServerAddress}:{ServerPort} | Ошибка: {ErrorMessage}\x1b[0m | #{CheckNumber}";
             }
+        }
+
+        public static string ToPlayersString(MCStatus.Player[] players, int maxPlayersToShow = 20)
+        {
+            if (players == null || players.Length == 0) return "";
+
+            var playerNames = players
+                .Select(p => p.Name)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            int playersToShow = Math.Min(playerNames.Count, maxPlayersToShow);
+            string result = string.Join(", ", playerNames.Take(playersToShow));
+
+            if (playerNames.Count > maxPlayersToShow)
+                result += $" и ещё {playerNames.Count - maxPlayersToShow} игроков";
+
+            return result;
+        }
+
+        public static string ToShortPlayersString(MCStatus.Player[] players, int maxPlayersToShow = 3)
+        {
+            if (players == null || players.Length == 0) return "";
+
+            var playerNames = players
+                .Select(p => p.Name)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            int playersToShow = Math.Min(playerNames.Count, maxPlayersToShow);
+            string result = string.Join(", ", playerNames.Take(playersToShow));
+
+            if (playerNames.Count > maxPlayersToShow)
+                result += $" +{playerNames.Count - maxPlayersToShow}";
+
+            return result;
         }
     }
 
@@ -367,6 +402,7 @@ namespace MCServerMonitor.Services
         public int TotalChecks { get; set; }
         public int SuccessfulChecks { get; set; }
         public int FailedChecks { get; set; }
+        public string DataFilePath { get; set; } = "";
 
         public double SuccessRate => TotalChecks > 0 ? (double)SuccessfulChecks / TotalChecks * 100 : 0;
     }

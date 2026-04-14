@@ -15,7 +15,6 @@ public class MenuManager
         _configManager = new ConfigManager();
         _config = _monitor.GetCurrentConfig();
 
-        // Подписываемся на события мониторинга
         _monitor.OnDataCollected += OnDataCollected;
         _monitor.OnMonitoringStopped += OnMonitoringStopped;
     }
@@ -33,6 +32,10 @@ public class MenuManager
         if (_isMonitoringDisplay)
         {
             Console.WriteLine($"\n\n[Статистика] Всего проверок: {stats.TotalChecks}, Успешно: {stats.SuccessfulChecks}, Ошибок: {stats.FailedChecks}, Успешность: {stats.SuccessRate:F1}%");
+            if (!string.IsNullOrEmpty(stats.DataFilePath) && File.Exists(stats.DataFilePath))
+            {
+                Console.WriteLine($"[Статистика] Данные сохранены в: {stats.DataFilePath}");
+            }
             Console.WriteLine("\nНажмите любую клавишу для возврата в главное меню...");
             Console.ReadKey(true);
             _isMonitoringDisplay = false;
@@ -116,7 +119,6 @@ public class MenuManager
 
         Console.WriteLine("\nМониторинг запущен. Нажмите 'S' для остановки...");
 
-        // Ожидаем нажатия S для остановки
         while (_monitor.IsMonitoring)
         {
             if (Console.KeyAvailable)
@@ -146,14 +148,15 @@ public class MenuManager
             Console.ResetColor();
             Console.WriteLine();
             Console.WriteLine($"  1. Сохранять результаты в файл: {(_config.EnableFileSave ? "Да ✓" : "Нет ✗")}");
-            Console.WriteLine($"  2. Путь сохранения файла: {_config.FilePath}");
-            Console.WriteLine($"  3. Интервал проверки: {_config.CheckIntervalSeconds} сек. ({_config.CheckIntervalSeconds / 60} мин)");
-            Console.WriteLine($"  4. Адрес сервера: {_config.ServerAddress}:{_config.ServerPort}");
+            Console.WriteLine($"  2. Папка сохранения: {_config.SaveFolderPath}");
+            Console.WriteLine($"  3. Имя файла использовать: {(_config.FileNamingPattern == FileNamingPattern.ServerName ? "Имя сервера" : "IP адрес")}");
+            Console.WriteLine($"  4. Интервал проверки: {_config.CheckIntervalSeconds} сек. ({_config.CheckIntervalSeconds / 60} мин)");
+            Console.WriteLine($"  5. Адрес сервера: {_config.ServerAddress}:{_config.ServerPort}");
             Console.WriteLine();
-            Console.WriteLine("  5. ✓ Сохранить настройки и выйти");
-            Console.WriteLine("  6. ✖ Выйти без сохранения");
+            Console.WriteLine("  6. ✓ Сохранить настройки и выйти");
+            Console.WriteLine("  7. ✖ Выйти без сохранения");
             Console.WriteLine();
-            Console.Write("Выберите действие (1-6): ");
+            Console.Write("Выберите действие (1-7): ");
 
             string choice = Console.ReadLine()?.Trim();
 
@@ -166,11 +169,38 @@ public class MenuManager
                     break;
 
                 case "2":
-                    await ChangeFilePathAsync();
+                    await ChangeFolderPathAsync();
                     settingsChanged = true;
                     break;
 
                 case "3":
+                    Console.WriteLine();
+                    Console.WriteLine("Выберите, что использовать для имени файла:");
+                    Console.WriteLine("  1. Имя сервера (например, mc_hypixel_net)");
+                    Console.WriteLine("  2. IP адрес (например, 123_456_78_90)");
+                    Console.WriteLine();
+                    Console.Write("Ваш выбор (1-2): ");
+
+                    string namingChoice = Console.ReadLine()?.Trim();
+                    if (namingChoice == "1")
+                    {
+                        _config.FileNamingPattern = FileNamingPattern.ServerName;
+                        settingsChanged = true;
+                        ShowMessage("Имя файла будет содержать имя сервера");
+                    }
+                    else if (namingChoice == "2")
+                    {
+                        _config.FileNamingPattern = FileNamingPattern.ServerAddress;
+                        settingsChanged = true;
+                        ShowMessage("Имя файла будет содержать IP адрес");
+                    }
+                    else
+                    {
+                        ShowMessage("Неверный выбор", true);
+                    }
+                    break;
+
+                case "4":
                     Console.Write("Введите интервал проверки в секундах (минимум 5): ");
                     if (int.TryParse(Console.ReadLine(), out int interval) && interval >= 5)
                     {
@@ -184,7 +214,7 @@ public class MenuManager
                     }
                     break;
 
-                case "4":
+                case "5":
                     Console.Write("Введите адрес Minecraft сервера (домен или IP): ");
                     string serverAddress = Console.ReadLine()?.Trim();
                     if (!string.IsNullOrEmpty(serverAddress))
@@ -211,7 +241,7 @@ public class MenuManager
                     }
                     break;
 
-                case "5":
+                case "6":
                     if (settingsChanged)
                     {
                         bool saved = await _monitor.UpdateConfigAsync(_config);
@@ -227,7 +257,7 @@ public class MenuManager
                     }
                     return;
 
-                case "6":
+                case "7":
                     if (settingsChanged)
                     {
                         ShowMessage("Изменения не сохранены", true, 1500);
@@ -241,16 +271,20 @@ public class MenuManager
         }
     }
 
-    private async Task ChangeFilePathAsync()
+    private async Task ChangeFolderPathAsync()
     {
         Console.WriteLine();
-        Console.WriteLine("Введите путь для сохранения файла.");
-        Console.WriteLine("Примеры:");
-        Console.WriteLine($"  - {_monitor.GetDefaultFilePath()} (рекомендуется)");
-        Console.WriteLine("  - C:\\Users\\ВашеИмя\\Desktop\\minecraft_stats.txt");
-        Console.WriteLine("  - minecraft_server_data.txt (в папке программы)");
+        Console.WriteLine("Введите путь к ПАПКЕ для сохранения файлов.");
+        Console.WriteLine("Программа сама создаст файл с именем, содержащим:");
+        Console.WriteLine("  - адрес сервера");
+        Console.WriteLine("  - дату и время запуска мониторинга");
         Console.WriteLine();
-        Console.Write("Путь: ");
+        Console.WriteLine("Примеры:");
+        Console.WriteLine($"  - {_monitor.GetDefaultFolderPath()} (рекомендуется)");
+        Console.WriteLine("  - C:\\Users\\ВашеИмя\\Desktop\\MinecraftStats");
+        Console.WriteLine("  - D:\\ServerMonitoring");
+        Console.WriteLine();
+        Console.Write("Путь к папке: ");
 
         string newPath = Console.ReadLine()?.Trim();
 
@@ -260,11 +294,10 @@ public class MenuManager
             return;
         }
 
-        // Проверяем права доступа
-        if (_monitor.IsPathWritable(newPath))
+        if (_monitor.IsFolderWritable(newPath))
         {
-            _config.FilePath = newPath;
-            ShowMessage($"Путь сохранения изменён: {_config.FilePath}");
+            _config.SaveFolderPath = newPath;
+            ShowMessage($"Папка сохранения изменена: {_config.SaveFolderPath}");
         }
         else
         {
@@ -272,13 +305,13 @@ public class MenuManager
 
             Console.WriteLine();
             Console.WriteLine("Предлагаю использовать путь по умолчанию:");
-            Console.WriteLine(_monitor.GetDefaultFilePath());
+            Console.WriteLine(_monitor.GetDefaultFolderPath());
             Console.Write("Использовать этот путь? (y/n): ");
 
             if (Console.ReadLine()?.Trim().ToLower() == "y")
             {
-                _config.FilePath = _monitor.GetDefaultFilePath();
-                ShowMessage($"Путь изменён на: {_config.FilePath}");
+                _config.SaveFolderPath = _monitor.GetDefaultFolderPath();
+                ShowMessage($"Путь изменён на: {_config.SaveFolderPath}");
             }
         }
     }
@@ -314,7 +347,7 @@ public class MenuManager
         Console.ReadKey(true);
     }
 
-    private void ShowMessage(string message, bool isError = false, int delayMs = 500)
+    private void ShowMessage(string message, bool isError = false, int delayMs = 1000)
     {
         if (isError)
         {

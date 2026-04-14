@@ -13,7 +13,6 @@ namespace MCServerMonitor.Services
             {
                 var startTime = DateTime.Now;
 
-                // Используем библиотеку MCStatus.NET для получения статуса
                 var status = await ServerListClient.GetStatusAsync(host, (ushort)port);
 
                 var latency = (int)(DateTime.Now - startTime).TotalMilliseconds;

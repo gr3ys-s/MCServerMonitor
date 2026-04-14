@@ -18,11 +18,10 @@ namespace MCServerMonitor.Services
                     var config = JsonSerializer.Deserialize<Config>(json);
                     if (config != null)
                     {
-                        // Проверяем, доступен ли путь для записи
-                        if (!string.IsNullOrEmpty(config.FilePath) && !IsPathWritable(config.FilePath))
+                        if (!string.IsNullOrEmpty(config.SaveFolderPath) && !IsFolderWritable(config.SaveFolderPath))
                         {
-                            Console.WriteLine($"[Предупреждение] Путь '{config.FilePath}' недоступен для записи. Будет использован путь по умолчанию.");
-                            config.FilePath = GetDefaultFilePath();
+                            Console.WriteLine($"[Предупреждение] Папка '{config.SaveFolderPath}' недоступна для записи. Будет использована папка по умолчанию.");
+                            config.SaveFolderPath = GetDefaultFolderPath();
                         }
                         return config;
                     }
@@ -33,9 +32,8 @@ namespace MCServerMonitor.Services
                 Console.WriteLine($"[Ошибка] Не удалось загрузить настройки: {ex.Message}");
             }
 
-            // Возвращаем настройки по умолчанию
             var defaultConfig = new Config();
-            defaultConfig.FilePath = GetDefaultFilePath();
+            defaultConfig.SaveFolderPath = GetDefaultFolderPath();
             return defaultConfig;
         }
 
@@ -43,10 +41,9 @@ namespace MCServerMonitor.Services
         {
             try
             {
-                // Проверяем путь перед сохранением
-                if (!string.IsNullOrEmpty(config.FilePath) && !IsPathWritable(config.FilePath))
+                if (!string.IsNullOrEmpty(config.SaveFolderPath) && !IsFolderWritable(config.SaveFolderPath))
                 {
-                    Console.WriteLine($"[Ошибка] Путь '{config.FilePath}' недоступен для записи.");
+                    Console.WriteLine($"[Ошибка] Папка '{config.SaveFolderPath}' недоступна для записи.");
                     return false;
                 }
 
@@ -68,28 +65,18 @@ namespace MCServerMonitor.Services
         }
 
         /// <summary>
-        /// Проверяет, доступен ли путь для записи
+        /// Проверяет, доступна ли папка для записи
         /// </summary>
-        public bool IsPathWritable(string filePath)
+        public bool IsFolderWritable(string folderPath)
         {
             try
             {
-                // Получаем директорию
-                string directory = Path.GetDirectoryName(filePath);
-                if (string.IsNullOrEmpty(directory))
+                if (!Directory.Exists(folderPath))
                 {
-                    directory = AppDomain.CurrentDomain.BaseDirectory;
+                    Directory.CreateDirectory(folderPath);
                 }
 
-                // Проверяем существование директории
-                if (!Directory.Exists(directory))
-                {
-                    // Пытаемся создать директорию
-                    Directory.CreateDirectory(directory);
-                }
-
-                // Создаём тестовый файл для проверки прав
-                string testFile = Path.Combine(directory, $"test_{Guid.NewGuid()}.tmp");
+                string testFile = Path.Combine(folderPath, $"test_{Guid.NewGuid()}.tmp");
                 File.WriteAllText(testFile, "test");
                 File.Delete(testFile);
 
@@ -112,27 +99,62 @@ namespace MCServerMonitor.Services
         /// <summary>
         /// Возвращает путь по умолчанию в папке Documents пользователя
         /// </summary>
-        public string GetDefaultFilePath()
+        public string GetDefaultFolderPath()
         {
             try
             {
-                // Используем папку Documents пользователя
                 string documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
                 string appFolder = Path.Combine(documentsPath, "MinecraftServerMonitor");
 
-                // Создаём папку приложения, если её нет
                 if (!Directory.Exists(appFolder))
                 {
                     Directory.CreateDirectory(appFolder);
                 }
 
-                return Path.Combine(appFolder, "minecraft_server_data.txt");
+                return appFolder;
             }
             catch
             {
-                // Если не удалось получить Documents, используем текущую папку
-                return "minecraft_server_data.txt";
+                return AppDomain.CurrentDomain.BaseDirectory;
             }
+        }
+
+        /// <summary>
+        /// Генерирует имя файла на основе адреса сервера и времени старта
+        /// </summary>
+        public string GenerateFileName(string serverAddress, int serverPort, FileNamingPattern pattern, DateTime startTime, int duration)
+        {
+            string serverName;
+            if (pattern == FileNamingPattern.ServerName)
+            {
+                serverName = serverAddress.Replace('.', '_').Replace(':', '_');
+            }
+            else
+            {
+                try
+                {
+                    var ips = System.Net.Dns.GetHostAddresses(serverAddress);
+                    var ipv4 = System.Array.Find(ips, ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
+                    serverName = (ipv4?.ToString() ?? serverAddress).Replace('.', '_');
+                }
+                catch
+                {
+                    serverName = serverAddress.Replace('.', '_');
+                }
+            }
+
+            string dateTimeStr = startTime.ToString("yyyy-MM-dd_HH-mm-ss");
+
+            return $"monitor_{serverName}_{dateTimeStr}_{duration}sec.txt";
+        }
+
+        /// <summary>
+        /// Получает полный путь к файлу для сохранения
+        /// </summary>
+        public string GetFullFilePath(Config config, DateTime startTime, int duration)
+        {
+            string fileName = GenerateFileName(config.ServerAddress, config.ServerPort, config.FileNamingPattern, startTime, duration);
+            return Path.Combine(config.SaveFolderPath, fileName);
         }
     }
 }

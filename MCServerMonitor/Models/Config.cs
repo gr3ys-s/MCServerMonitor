@@ -7,16 +7,25 @@ namespace MCServerMonitor.Models
         [JsonPropertyName("enable_file_save")]
         public bool EnableFileSave { get; set; } = true;
 
-        [JsonPropertyName("file_path")]
-        public string FilePath { get; set; } = "minecraft_server_data.txt";
+        [JsonPropertyName("save_folder_path")]
+        public string SaveFolderPath { get; set; } = ""; 
 
         [JsonPropertyName("check_interval_seconds")]
-        public int CheckIntervalSeconds { get; set; } = 3600; // По умолчанию 1 час
+        public int CheckIntervalSeconds { get; set; } = 3600; 
 
         [JsonPropertyName("server_address")]
         public string ServerAddress { get; set; } = "localhost";
 
         [JsonPropertyName("server_port")]
         public int ServerPort { get; set; } = 25565;
+
+        [JsonPropertyName("file_naming_pattern")]
+        public FileNamingPattern FileNamingPattern { get; set; } = FileNamingPattern.ServerName; 
+    }
+
+    public enum FileNamingPattern
+    {
+        ServerName = 0,   
+        ServerAddress = 1 
     }
 }
