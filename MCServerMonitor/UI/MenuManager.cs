@@ -7,18 +7,25 @@ public class MenuManager
     private readonly MonitorService _monitor;
     private Config _config;
     private readonly ConfigManager _configManager;
+    private readonly AutoStartManager _autoStartManager;
     private bool _isMonitoringDisplay;
 
     public MenuManager(MonitorService monitor)
     {
         _monitor = monitor;
         _configManager = new ConfigManager();
+        _autoStartManager = new AutoStartManager();
         _config = _monitor.GetCurrentConfig();
 
         _monitor.OnDataCollected += OnDataCollected;
         _monitor.OnMonitoringStopped += OnMonitoringStopped;
     }
 
+    /// <summary>
+    /// Обновление данных в консоли
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="data">Данные</param>
     private void OnDataCollected(object sender, MonitoringData data)
     {
         if (_isMonitoringDisplay)
@@ -27,6 +34,11 @@ public class MenuManager
         }
     }
 
+    /// <summary>
+    /// Остановка мониторинга в консоли
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="stats">Статистика</param>
     private void OnMonitoringStopped(object sender, MonitoringStats stats)
     {
         if (_isMonitoringDisplay)
@@ -42,6 +54,10 @@ public class MenuManager
         }
     }
 
+    /// <summary>
+    /// Запуск в консоли
+    /// </summary>
+    /// <returns></returns>
     public async Task RunAsync()
     {
         while (true)
@@ -64,6 +80,9 @@ public class MenuManager
                     await ShowLastRecordsAsync();
                     break;
                 case "4":
+                    await ShowAutoStartMenuAsync();
+                    break;
+                case "0":
                     Console.WriteLine("\nВыход из программы...");
                     if (_monitor.IsMonitoring)
                     {
@@ -95,11 +114,16 @@ public class MenuManager
         Console.WriteLine("  1. ▶ Запустить мониторинг");
         Console.WriteLine("  2. ⚙ Настройки");
         Console.WriteLine("  3. 📄 Просмотреть последние записи");
-        Console.WriteLine("  4. ✖ Выход");
+        Console.WriteLine("  4. 🔄 Управление автозагрузкой");
+        Console.WriteLine("  0. ✖ Выход");
         Console.WriteLine();
         Console.Write("Выберите действие (1-4): ");
     }
 
+    /// <summary>
+    /// Запуск мониторинга в консоли
+    /// </summary>
+    /// <returns></returns>
     private async Task StartMonitoringAsync()
     {
         Console.Clear();
@@ -134,6 +158,10 @@ public class MenuManager
         }
     }
 
+    /// <summary>
+    /// Отображение меню настроек
+    /// </summary>
+    /// <returns></returns>
     private async Task ShowSettingsMenuAsync()
     {
         bool settingsChanged = false;
@@ -153,10 +181,10 @@ public class MenuManager
             Console.WriteLine($"  4. Интервал проверки: {_config.CheckIntervalSeconds} сек. ({_config.CheckIntervalSeconds / 60} мин)");
             Console.WriteLine($"  5. Адрес сервера: {_config.ServerAddress}:{_config.ServerPort}");
             Console.WriteLine();
-            Console.WriteLine("  6. ✓ Сохранить настройки и выйти");
-            Console.WriteLine("  7. ✖ Выйти без сохранения");
+            Console.WriteLine("  S. ✓ Сохранить настройки и выйти");
+            Console.WriteLine("  0. ✖ Выйти без сохранения");
             Console.WriteLine();
-            Console.Write("Выберите действие (1-7): ");
+            Console.Write("Выберите действие (1-5): ");
 
             string choice = Console.ReadLine()?.Trim();
 
@@ -241,7 +269,7 @@ public class MenuManager
                     }
                     break;
 
-                case "6":
+                case "S":
                     if (settingsChanged)
                     {
                         bool saved = await _monitor.UpdateConfigAsync(_config);
@@ -257,7 +285,7 @@ public class MenuManager
                     }
                     return;
 
-                case "7":
+                case "0":
                     if (settingsChanged)
                     {
                         ShowMessage("Изменения не сохранены", true, 1500);
@@ -271,6 +299,75 @@ public class MenuManager
         }
     }
 
+    /// <summary>
+    /// Отображение меню автозагрузки
+    /// </summary>
+    /// <returns></returns>
+    private async Task ShowAutoStartMenuAsync()
+    {
+        Console.Clear();
+        DisplayHeader();
+
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("УПРАВЛЕНИЕ АВТОЗАГРУЗКОЙ");
+        Console.ResetColor();
+        Console.WriteLine("=".PadRight(50, '='));
+        Console.WriteLine();
+
+        bool isEnabled = _autoStartManager.IsAutoStartEnabled();
+
+        Console.WriteLine($"Текущий статус: {(isEnabled ? "✓ Включена" : "✗ Отключена")}");
+        Console.WriteLine();
+        Console.WriteLine("Что делает автозагрузка?");
+        Console.WriteLine("  - Программа будет автоматически запускаться при старте Windows");
+        Console.WriteLine("  - Мониторинг начнётся сразу с сохранёнными настройками");
+        Console.WriteLine("  - Для остановки нужно будет завершить процесс через Диспетчер задач");
+        Console.WriteLine();
+        Console.WriteLine("1. Включить автозагрузку");
+        Console.WriteLine("2. Отключить автозагрузку");
+        Console.WriteLine("0. Назад в главное меню");
+        Console.WriteLine();
+        Console.Write("Выберите действие (1-2): ");
+
+        string choice = Console.ReadLine()?.Trim();
+
+        switch (choice)
+        {
+            case "1":
+                if (await _autoStartManager.AddToStartupAsync())
+                {
+                    ShowMessage("Автозагрузка включена! Программа будет запускаться с Windows.", false, 2000);
+                }
+                else
+                {
+                    ShowMessage("Не удалось включить автозагрузку. Запустите программу от имени администратора.", true, 2000);
+                }
+                break;
+
+            case "2":
+                if (await _autoStartManager.RemoveFromStartupAsync())
+                {
+                    ShowMessage("Автозагрузка отключена.", false, 2000);
+                }
+                else
+                {
+                    ShowMessage("Не удалось отключить автозагрузку.", true, 2000);
+                }
+                break;
+
+            case "0":
+                return;
+
+            default:
+                ShowMessage("Неверный выбор", true);
+                break;
+        }
+    }
+    
+    /// <summary>
+    /// Смена пути сохранения
+    /// </summary>
+    /// <returns></returns>
     private async Task ChangeFolderPathAsync()
     {
         Console.WriteLine();
@@ -316,6 +413,10 @@ public class MenuManager
         }
     }
 
+    /// <summary>
+    /// Отображение последних записей
+    /// </summary>
+    /// <returns></returns>
     private async Task ShowLastRecordsAsync()
     {
         Console.Clear();
@@ -347,6 +448,12 @@ public class MenuManager
         Console.ReadKey(true);
     }
 
+    /// <summary>
+    /// Системные сообщения (при ошибках)
+    /// </summary>
+    /// <param name="message">Сообщение</param>
+    /// <param name="isError">Проверка на ошибку</param>
+    /// <param name="delayMs">Длительность паузы</param>
     private void ShowMessage(string message, bool isError = false, int delayMs = 1000)
     {
         if (isError)

@@ -29,6 +29,11 @@ namespace MCServerMonitor.Services
             _currentConfig = _configManager.LoadConfigAsync().GetAwaiter().GetResult();
         }
 
+        /// <summary>
+        /// Запуск мониторинга
+        /// </summary>
+        /// <param name="config">Текущая конфигурация</param>
+        /// <returns></returns>
         public async Task<bool> StartMonitoringAsync(Config config)
         {
             if (_isMonitoring)
@@ -94,6 +99,10 @@ namespace MCServerMonitor.Services
             return true;
         }
 
+        /// <summary>
+        /// Остановка мониторинга
+        /// </summary>
+        /// <returns></returns>
         public async Task StopMonitoringAsync()
         {
             if (!_isMonitoring)
@@ -130,6 +139,11 @@ namespace MCServerMonitor.Services
             Console.WriteLine("[Система] Мониторинг остановлен");
         }
 
+        /// <summary>
+        /// Обновление мониторинга
+        /// </summary>
+        /// <param name="cancellationToken"></param>
+        /// <returns></returns>
         private async Task MonitoringLoopAsync(CancellationToken cancellationToken)
         {
             int checkCounter = 0;
@@ -203,6 +217,11 @@ namespace MCServerMonitor.Services
             }
         }
 
+        /// <summary>
+        /// Сохранение данных в файл
+        /// </summary>
+        /// <param name="data"></param>
+        /// <returns></returns>
         private async Task SaveDataAsync(MonitoringData data)
         {
             try
@@ -228,6 +247,11 @@ namespace MCServerMonitor.Services
             }
         }
 
+        /// <summary>
+        /// Отображение последних записей файла
+        /// </summary>
+        /// <param name="count"></param>
+        /// <returns></returns>
         public async Task<List<string>> GetLastRecordsAsync(int count = 20)
         {
             var records = new List<string>();

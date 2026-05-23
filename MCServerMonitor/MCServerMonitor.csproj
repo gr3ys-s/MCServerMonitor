@@ -6,6 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
 	<LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
+	<PublishSingleFile>true</PublishSingleFile> 
+	<SelfContained>false</SelfContained>
   </PropertyGroup>
 
   <ItemGroup>

@@ -5,9 +5,20 @@ namespace MCServerMonitor.Services
 {
     public class ConfigManager
     {
+        /// <summary>
+        /// Название файла конфигурации
+        /// </summary>
         private const string ConfigFileName = "minecraft_monitor_config.json";
+
+        /// <summary>
+        /// Путь файла конфигурации
+        /// </summary>
         private string ConfigPath => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ConfigFileName);
 
+        /// <summary>
+        /// Загрузка конфигурации
+        /// </summary>
+        /// <returns></returns>
         public async Task<Config> LoadConfigAsync()
         {
             try
@@ -37,6 +48,11 @@ namespace MCServerMonitor.Services
             return defaultConfig;
         }
 
+        /// <summary>
+        /// Сохранение конфигурации
+        /// </summary>
+        /// <param name="config"></param>
+        /// <returns></returns>
         public async Task<bool> SaveConfigAsync(Config config)
         {
             try
